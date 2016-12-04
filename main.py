@@ -1,11 +1,11 @@
 import os
 import scipy.misc
 import numpy as np
-
 from model import DCGAN
 from utils import pp, visualize, to_json
 
 import tensorflow as tf
+
 
 flags = tf.app.flags
 flags.DEFINE_integer("epoch", 25, "Epoch to train [25]")
@@ -26,12 +26,10 @@ FLAGS = flags.FLAGS
 
 def main(_):
     pp.pprint(flags.FLAGS.__flags)
-
     if not os.path.exists(FLAGS.checkpoint_dir):
         os.makedirs(FLAGS.checkpoint_dir)
     if not os.path.exists(FLAGS.sample_dir):
         os.makedirs(FLAGS.sample_dir)
-
     with tf.Session() as sess:
         if FLAGS.dataset == 'mnist':
             dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, y_dim=10, output_size=28, c_dim=1,
@@ -44,6 +42,7 @@ def main(_):
             dcgan.train(FLAGS)
         else:
             dcgan.load(FLAGS.checkpoint_dir)
+            print(dcgan.evaluate(6400))
 
         if FLAGS.visualize:
             # to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],

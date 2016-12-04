@@ -6,8 +6,16 @@ import tensorflow as tf
 import numpy as np
 from six.moves import xrange
 
+import theano
+import theano.tensor as T
+
 from ops import *
 from utils import *
+
+from inception_score import get_inception_score
+from skimage.color import gray2rgb
+import scipy.misc
+import skimage
 
 class DCGAN(object):
     def __init__(self, sess, image_size=108, is_crop=True,
@@ -162,7 +170,6 @@ class DCGAN(object):
             else:            
                 data = glob(os.path.join("./data", config.dataset, "*.jpg"))
                 batch_idxs = min(len(data), config.train_size) // config.batch_size
-
             for idx in xrange(0, batch_idxs):
                 if config.dataset == 'mnist':
                     batch_images = data_X[idx*config.batch_size:(idx+1)*config.batch_size]
@@ -240,7 +247,7 @@ class DCGAN(object):
                 if np.mod(counter, 500) == 2:
                     self.save(config.checkpoint_dir, counter)
 
-    def discriminator(self, image, y=None, reuse=False):
+    def discriminator(self, image, y=None, reuse=False, keep_prob=0.75):
         if reuse:
             tf.get_variable_scope().reuse_variables()
 
@@ -270,7 +277,7 @@ class DCGAN(object):
             
             return tf.nn.sigmoid(h3), h3
 
-    def generator(self, z, y=None):
+    def generator(self, z, y=None, keep_prob=0.75):
         if not self.y_dim:
             s = self.output_size
             s2, s4, s8, s16 = int(s/2), int(s/4), int(s/8), int(s/16)
@@ -295,7 +302,6 @@ class DCGAN(object):
 
             h4, self.h4_w, self.h4_b = deconv2d(h3,
                 [self.batch_size, s, s, self.c_dim], name='g_h4', with_w=True)
-
             return tf.nn.tanh(h4)
         else:
             s = self.output_size
@@ -373,6 +379,26 @@ class DCGAN(object):
         fd = open(os.path.join(data_dir,'train-labels-idx1-ubyte'))
         loaded = np.fromfile(file=fd,dtype=np.uint8)
         trY = loaded[8:].reshape((60000)).astype(np.float)
+        
+        trY = np.asarray(trY)
+        
+        X = trX
+        y = trY
+        
+        seed = 547
+        np.random.seed(seed)
+        np.random.shuffle(X)
+        np.random.seed(seed)
+        np.random.shuffle(y)
+        
+        y_vec = np.zeros((len(y), self.y_dim), dtype=np.float)
+        for i, label in enumerate(y):
+            y_vec[i,y[i]] = 1.0
+        
+        return X/255.,y_vec
+
+    def load_mnist_test(self):
+        data_dir = os.path.join("./data", self.dataset_name)        
 
         fd = open(os.path.join(data_dir,'t10k-images-idx3-ubyte'))
         loaded = np.fromfile(file=fd,dtype=np.uint8)
@@ -382,11 +408,8 @@ class DCGAN(object):
         loaded = np.fromfile(file=fd,dtype=np.uint8)
         teY = loaded[8:].reshape((10000)).astype(np.float)
 
-        trY = np.asarray(trY)
-        teY = np.asarray(teY)
-        
-        X = np.concatenate((trX, teX), axis=0)
-        y = np.concatenate((trY, teY), axis=0)
+        X = teX
+        y = teY
         
         seed = 547
         np.random.seed(seed)
@@ -424,4 +447,30 @@ class DCGAN(object):
             self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
             return True
         else:
-            return False
+            return False        
+
+ 
+    def evaluate(self, num_samples):
+        """
+        Evaluates probability of test set via Gaussian parzen window
+        Currently assumes MNIST
+        """
+        # test_X, test_y = self.load_mnist_test()
+        # generate 50000 samples
+        samples = []
+        for k in range(num_samples // 64):
+            sample_z = np.random.uniform(-1, 1, size=(64, self.z_dim))
+            labels = np.zeros([64, 10])
+            for i in range(64):
+                labels[i, np.random.randint(0, 10)] = 1
+            samples.extend(self.sess.run([self.sampler],
+                                         feed_dict={self.z: sample_z, self.y:labels})[0])
+        
+        #images = inverse_transform(np.array(samples)) * 256
+        images = [skimage.img_as_ubyte(np.squeeze(gray2rgb(x))) for x in samples]
+        #scipy.misc.imsave('test/blah.png', images[0])
+        # print(images[0].shape)
+        # print(images[0])
+        return get_inception_score(list(images))
+
+
